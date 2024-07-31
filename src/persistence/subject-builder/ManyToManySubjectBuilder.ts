@@ -184,20 +184,28 @@ export class ManyToManySubjectBuilder {
             this.subjects.push(junctionSubject)
 
             relation.junctionEntityMetadata!.ownerColumns.forEach((column) => {
+                let value = ownerValue;
+                if(column.referencedColumn.transformer !== undefined) {
+                    value = this.applyTransformers(column.referencedColumn, ownerValue);
+                }
                 junctionSubject.changeMaps.push({
                     column: column,
-                    value: ownerValue,
+                    value: value,
                     // valueFactory: (value) => column.referencedColumn!.getEntityValue(value) // column.referencedColumn!.getEntityValue(ownerEntityMap),
-                })
+                });
             })
 
             relation.junctionEntityMetadata!.inverseColumns.forEach(
                 (column) => {
+                    let value = inverseValue;
+                    if(column.referencedColumn.transformer !== undefined) {
+                        value = this.applyTransformers(column.referencedColumn, inverseValue);
+                    }
                     junctionSubject.changeMaps.push({
                         column: column,
-                        value: inverseValue,
+                        value: value,
                         // valueFactory: (value) => column.referencedColumn!.getEntityValue(value) // column.referencedColumn!.getEntityValue(inverseEntityMap),
-                    })
+                    });
                 },
             )
         })
@@ -256,36 +264,75 @@ export class ManyToManySubjectBuilder {
     }
 
     /**
+     * Applies transformers to a given value based on the column metadata.
+     * @param {Column} column - The column metadata containing the transformer.
+     * @param {Value | any} value - The value to be transformed.
+     * @returns {any} The transformed value.
+     */
+    applyTransformers(column: any, value: any): any {
+        // Check if a transformer is defined for the column.
+        if (column.transformer !== undefined) {
+            // Handle case when value is an object with an identifier property.
+            if (value && value.identifier) {
+                let valueToTransform = value.identifier[column.propertyName];
+                let transformedValue = column.transformer.to(valueToTransform);
+
+                if (transformedValue) {
+                    value.identifier[column.propertyName] = transformedValue;
+                    value.entity[column.propertyName] = transformedValue;
+                    value.entityWithFulfilledIds[column.propertyName] = transformedValue;
+                }
+                // Handle case when value is an object with the property directly.
+            } else if (value[column.propertyName]) {
+                let valueToTransform = value[column.propertyName];
+                value[column.propertyName] = column.transformer.to(valueToTransform);
+                // Handle case when value is a primitive type.
+            } else if (typeof value !== 'object') {
+                let valueToTransform = value;
+                value = column.transformer.to(valueToTransform);
+            }
+        }
+
+        return value;
+    }
+
+    /**
      * Creates identifiers for junction table.
      * Example: { postId: 1, categoryId: 2 }
+     * @param {Object} subject - The subject entity containing the data.
+     * @param {Object} relation - The relation metadata describing the junction.
+     * @param {Object} relationId - The identifier of the related entity.
+     * @returns {Object} The junction table identifier.
      */
     protected buildJunctionIdentifier(
         subject: Subject,
         relation: RelationMetadata,
         relationId: ObjectLiteral,
     ) {
-        const ownerEntityMap = relation.isOwning ? subject.entity! : relationId
-        const inverseEntityMap = relation.isOwning
-            ? relationId
-            : subject.entity!
+        // Determine the owner and inverse entity maps based on the ownership of the relation.
+        const ownerEntityMap = relation.isOwning ? subject.entity : relationId;
+        const inverseEntityMap = relation.isOwning ? relationId : subject.entity;
 
-        const identifier: ObjectLiteral = {}
-        relation.junctionEntityMetadata!.ownerColumns.forEach((column) => {
-            OrmUtils.mergeDeep(
-                identifier,
-                column.createValueMap(
-                    column.referencedColumn!.getEntityValue(ownerEntityMap),
-                ),
-            )
-        })
-        relation.junctionEntityMetadata!.inverseColumns.forEach((column) => {
-            OrmUtils.mergeDeep(
-                identifier,
-                column.createValueMap(
-                    column.referencedColumn!.getEntityValue(inverseEntityMap),
-                ),
-            )
-        })
-        return identifier
+        // Initialize an empty identifier object.
+        const identifier = {};
+
+        // Helper function to process columns and merge values into the identifier.
+        const processColumns = (columns: any[], entityMap: ObjectLiteral) => {
+            columns.forEach((column) => {
+                let value = column.referencedColumn.getEntityValue(entityMap);
+                // Apply transformers if they exist.
+                if (column.referencedColumn.transformer !== undefined && value) {
+                    value = this.applyTransformers(column.referencedColumn, value);
+                }
+                // Merge the value map into the identifier.
+                OrmUtils.mergeDeep(identifier, column.createValueMap(value));
+            });
+        };
+
+        // Process owner and inverse columns.
+        processColumns(relation.junctionEntityMetadata.ownerColumns, ownerEntityMap);
+        processColumns(relation.junctionEntityMetadata.inverseColumns, inverseEntityMap);
+
+        return identifier;
     }
 }
