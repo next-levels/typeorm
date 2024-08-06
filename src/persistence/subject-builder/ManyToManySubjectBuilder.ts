@@ -278,9 +278,7 @@ export class ManyToManySubjectBuilder {
                 let transformedValue = column.transformer.to(valueToTransform);
 
                 if (transformedValue) {
-                    value.identifier[column.propertyName] = transformedValue;
-                    value.entity[column.propertyName] = transformedValue;
-                    value.entityWithFulfilledIds[column.propertyName] = transformedValue;
+                    return {[column.propertyName]: transformedValue};
                 }
                 // Handle case when value is an object with the property directly.
             } else if (value[column.propertyName]) {
